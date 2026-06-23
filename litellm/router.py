@@ -6491,6 +6491,11 @@ class Router:
         if disable_fallbacks is True or original_model_group is None:
             raise e
 
+        # Resolve model_group_alias so fallback configs keyed by the real model
+        # group name are matched even when the caller used an alias.
+        if model_group is not None:
+            model_group = self._get_model_from_alias(model_group) or model_group
+
         input_kwargs = {
             "litellm_router": self,
             "original_exception": original_exception,
@@ -8481,15 +8486,14 @@ class Router:
             if split_litellm_model in litellm._known_custom_logger_compatible_callbacks:
                 is_prompt_management_model = True
 
-        if is_prompt_management_model:
-            # For prompt management models, skip LLM provider validation
-            # The actual model will be resolved at runtime from the prompt file
+        is_virtual_router_model = litellm_model.startswith("auto_router/")
+
+        if is_prompt_management_model or is_virtual_router_model:
             _model = litellm_model
             custom_llm_provider = None
             dynamic_api_key = None
             api_base = None
         else:
-            # check if model provider in supported providers
             (
                 _model,
                 custom_llm_provider,
@@ -8501,8 +8505,6 @@ class Router:
                     "custom_llm_provider", None
                 ),
             )
-            # done reading model["litellm_params"]
-            # Check if provider is supported: either in enum or JSON-configured
             if (
                 custom_llm_provider not in litellm.provider_list
                 and not JSONProviderRegistry.exists(custom_llm_provider)
@@ -11237,7 +11239,7 @@ class Router:
             # this hook can modify the model, messages before the routing decision is made
             #########################################################
             pre_routing_hook_response = await self.async_pre_routing_hook(
-                model=model,
+                model=self._get_model_from_alias(model) or model,
                 request_kwargs=request_kwargs,
                 messages=messages,
                 input=input,
